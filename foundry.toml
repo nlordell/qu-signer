@@ -1,0 +1,12 @@
+[profile.default]
+out = "build/out"
+cache_path = "build/cache"
+broadcast = "build/broadcast"
+
+solc_version = "0.8.34"
+remappings = [
+  "@/=src/",
+  "@script/=script/",
+  "@test/=test/",
+  "@forge-std/=lib/forge-std/src/",
+]
