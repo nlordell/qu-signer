@@ -1,3 +1,6 @@
+> [!WARNING]
+> Code in this repository is not audited and may contain serious security holes. It is provided as-is, use at your own risk.
+
 # quSigner
 
 Quantum-secure signer for the Safe smart account, I implemented this for fun and to learn about about how quantum-secure hash-based signing works.
