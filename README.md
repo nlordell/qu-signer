@@ -3,7 +3,7 @@
 
 # quSigner
 
-Quantum-secure signer for the Safe smart account, I implemented this for fun and to learn about about how quantum-secure hash-based signing works.
+Quantum-secure signer for the Safe smart account, I implemented this for fun and to learn a little about how hash-based signatures work.
 
 ## Rolling One-Time Signatures
 
