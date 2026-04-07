@@ -4,6 +4,9 @@ cache_path = "build/cache"
 broadcast = "build/broadcast"
 
 solc_version = "0.8.34"
+via_ir = true
+optimizer_runs = 1000000
+
 remappings = [
   "@/=src/",
   "@script/=script/",

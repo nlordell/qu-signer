@@ -2,105 +2,141 @@
 pragma solidity ^0.8.34;
 
 import {IERC1271, ILegacyERC1271} from "@/interfaces/IERC1271.sol";
+import {Address} from "@/libraries/Address.sol";
+import {WOTSp} from "@/libraries/WOTSp.sol";
 
 /// @title Quantum-Secure Signer
 /// @dev This signer implements a rolling Lamport signature scheme.
 contract QuSigner is IERC1271, ILegacyERC1271 {
-    /// @notice The current public key digest.
+    using WOTSp for WOTSp.Context;
+
+    /// @notice The Winternitz parameter.
+    /// @dev Can be either `4` or `16`.
+    uint256 public immutable W;
+
+    /// @notice The public seed used for randomizing WOTS+ hashes.
+    bytes32 public immutable SEED;
+
+    /// @notice The current WOTS+ public key L-tree root hash.
     /// @dev This signer implements a rolling signature scheme, where the public
-    ///      key changes after every signature. This is because the Lamport
-    ///      signing scheme used by the contract only supports one-time
-    ///      signatures, meaning that a new private key needs to be used for
-    ///      every new signed message.
+    ///      key changes after every signature. This is because the WOTS+
+    ///      signing scheme used by the contract is a one-time signature scheme,
+    ///      meaning that a new private key needs to be used for every message.
     // forge-lint: disable-next-line(mixed-case-variable)
-    bytes32 private $publicKeyDigest;
+    bytes32 private $publicKey;
+
+    /// @notice The signature count.
+    /// @dev We use this count as the XMSS tree address for WOTS+ operations.
+    // forge-lint: disable-next-line(mixed-case-variable)
+    uint64 private $count;
 
     /// @notice The signed messages.
     /// @dev This mapping stores the hash of the public key that last signed a
     ///      particular message.
     // forge-lint: disable-next-line(mixed-case-variable)
-    mapping(bytes32 message => bytes32) private $signedMessages;
+    mapping(bytes32 message => bytes32 publicKey) private $signedMessages;
 
     /// @notice Event emitted that a signature was signed.
-    event Signed(bytes32 message);
+    /// @param publicKey The WOTS+ public key that signed the message.
+    /// @param signatureIndex The index of the signature.
+    /// @param message The signed message.
+    event SignedMessage(bytes32 publicKey, uint64 signatureIndex, bytes32 message);
+
+    /// @notice An invalid Winternitz paramter value.
+    error InvalidWinternitzParameter();
+
+    /// @notice An invalid public key.
+    error InvalidPublicKey();
 
     /// @notice An invalid signature encoding.
-    error InvalidSignatureEncoding();
+    error InvalidSignature();
 
-    /// @notice The signature could not be authenticated against the public key
-    ///         digest.
+    /// @notice The signature could not be authenticated against the public key.
     error NotAuthenticated();
 
-    /// @param publicKeyDigest The initial hash of the first public key used by
-    ///                        the rolling signer.
-    constructor(bytes32 publicKeyDigest) {
-        $publicKeyDigest = publicKeyDigest;
+    /// @param w The Winternitz parameter.
+    /// @param seed The public seed used for randomizing WOTS+ hashes.
+    /// @param publicKey The initial public key used by the rolling signer.
+    constructor(uint256 w, bytes32 seed, bytes32 publicKey) {
+        require(w == 4 || w == 16, InvalidWinternitzParameter());
+        require(publicKey != bytes32(0), InvalidPublicKey());
+
+        W = w;
+        SEED = seed;
+        $publicKey = publicKey;
     }
 
-    /// @notice Gets the current public key digest.
-    /// @return result The current public key digest.
-    function getPublicKeyDigest() external view returns (bytes32 result) {
-        return $publicKeyDigest;
+    /// @notice Gets the current public key.
+    /// @return result The current WOTS+ public key L-tree root hash.
+    function getPublicKey() external view returns (bytes32 result) {
+        return $publicKey;
+    }
+
+    /// @notice Gets the signature count.
+    /// @return result The number of messages that have been signed.
+    function getCount() external view returns (uint64 result) {
+        return $count;
+    }
+
+    /// @notice Computes the signing message, that a WOTS+ private key actually
+    ///         signs over, for a particular message.
+    /// @dev The rolling signature scheme doesn't sign over messages directly,
+    ///      but a hash of the message with the next public key. This ensures
+    ///      that only authorized rollovers are possible.
+    /// @param randomness Additional randomness used for hashing.
+    /// @param nextPublicKey The public key to roll over to.
+    /// @param signatureIndex The index of the signature.
+    /// @param message The message to sign.
+    function getSigningMessage(bytes32 randomness, bytes32 nextPublicKey, uint64 signatureIndex, bytes32 message)
+        public
+        view
+        returns (bytes32 result)
+    {
+        // WARNING: Needs to be checked by an actual cryptographer.
+        // We re-purpose the `M'` computation from the XMSS_sign algorithm from
+        // RFC-8391 to compute a signing message, replacing `getRoot(SK)` with
+        // the next public key L-tree hash, and `idx_sig` with the signature
+        // index (which is closer to a tree address than an index within an XMSS
+        // tree). This provides sufficient randomization on the signing message
+        // to maintain the WOTS+ and XMSS cryptographic guarantees.
+        assembly ("memory-safe") {
+            let ptr := mload(0x40)
+            mstore(ptr, 2)
+            mstore(add(ptr, 0x20), randomness)
+            mstore(add(ptr, 0x40), nextPublicKey)
+            mstore(add(ptr, 0x60), signatureIndex)
+            mstore(add(ptr, 0x80), message)
+            if iszero(staticcall(gas(), 0x2, ptr, 0xa0, 0x00, 0x20)) { revert(0x00, 0x00) }
+            result := mload(0x00)
+        }
     }
 
     /// @notice Sign a message with the current one-time signature key and roll
     ///         over to a new key.
-    /// @dev The Lamport signature is not over the message itself, but the hash
-    ///      of the message with the next public key. This ensures that only
-    ///      authorized rollovers are possible (the _signing message_).
-    ///
-    ///      Additionally, the Lamport signature is encoded weaved with the
-    ///      the public key, in order to allow the contract to verify the public
-    ///      key matches the stored digest. For each bit with position `i` of
-    ///      the signing message, starting with the most significant bit,
-    ///      concatenate `sk_i,0; pk_i,1` if the bit is `0` or `pk_i,0; sk_i,1`
-    ///      if the bit is `1`, where `sk_i,j` is one of the 512 secret 256-bit
-    ///      values for bit position `i` and bit value `j`, and `pk_i,j` is
-    ///      just the `keccak256(sk_i,j)`. This encoding allows the contract to
-    ///      reconstruct the public key in-place and verify it against the
-    ///      stored public key digest.
+    /// @param randomness Additional randomness used for signing.
+    /// @param nextPublicKey The public key to roll over to.
     /// @param message The message to sign.
-    /// @param nextPublicKeyDigest The public key digest to roll over to.
     /// @param signature The Lamport signature over the hash of the message and
     ///                  the next public key.
-    /// @return publicKeyDigest The public key digest used to sign the message.
-    function sign(bytes32 message, bytes32 nextPublicKeyDigest, bytes memory signature)
+    /// @return publicKey The public key used to sign the message.
+    /// @return signatureIndex The index of the signature.
+    function sign(bytes32 randomness, bytes32 nextPublicKey, bytes32 message, bytes32[] calldata signature)
         external
-        returns (bytes32 publicKeyDigest)
+        returns (bytes32 publicKey, uint64 signatureIndex)
     {
-        require(signature.length == 0x4000, InvalidSignatureEncoding());
+        require(nextPublicKey != bytes32(0), InvalidPublicKey());
 
-        publicKeyDigest = $publicKeyDigest;
-        $publicKeyDigest = nextPublicKeyDigest;
-        $signedMessages[message] = publicKeyDigest;
+        publicKey = $publicKey;
+        $publicKey = nextPublicKey;
+        signatureIndex = $count++;
+        $signedMessages[message] = publicKey;
 
-        assembly ("memory-safe") {
-            // First, compute the signing message by hashing our message and the
-            // next public key together.
-            mstore(0x00, message)
-            mstore(0x20, nextPublicKeyDigest)
-            let signingMessage := keccak256(0x00, 0x40)
+        WOTSp.Context memory wots = WOTSp.Context({w: W, seed: SEED, adrs: Address.make(0, signatureIndex)});
+        bytes32 signingMessage = getSigningMessage(randomness, nextPublicKey, signatureIndex, message);
+        bytes32 signer = wots.recover(signingMessage, signature);
+        require(signer == publicKey, NotAuthenticated());
 
-            // Convert all of the secret values to public values from our
-            // interleaved Lamport signature. We work through the signature
-            // backwards.
-            for {
-                let ptr := add(signature, 0x3FE0)
-            } gt(ptr, signature) {
-                ptr := sub(ptr, 0x40)
-                signingMessage := shr(1, signingMessage)
-            } {
-                // `ptr` points to a bit pair, and so the interleaved secret is
-                // either the first word if the bit is `0` or the second if the
-                // bit is `1`. Compute the pointer to the secret and compute
-                // its public value by hashing it.
-                let skPtr := add(ptr, mul(and(signingMessage, 1), 0x20))
-                mstore(skPtr, keccak256(skPtr, 0x20))
-            }
-        }
-
-        require(keccak256(signature) == publicKeyDigest, NotAuthenticated());
-        emit Signed(message);
+        emit SignedMessage(publicKey, signatureIndex, message);
     }
 
     /// @inheritdoc IERC1271
@@ -119,8 +155,8 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
         view
         returns (bytes4 magicValue)
     {
-        require(signature.length == 0, InvalidSignatureEncoding());
-        bytes32 publicKeyHash = $signedMessages[digest];
-        return publicKeyHash != bytes32(0) ? validMagicValue : bytes4(0xffffffff);
+        require(signature.length == 0, InvalidSignature());
+        bytes32 publicKey = $signedMessages[digest];
+        return publicKey != bytes32(0) ? validMagicValue : bytes4(0xffffffff);
     }
 }

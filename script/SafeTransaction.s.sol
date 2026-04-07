@@ -3,34 +3,38 @@ pragma solidity ^0.8.34;
 
 import {Script, console} from "@forge-std/Script.sol";
 import {QuSigner} from "@/QuSigner.sol";
+import {Address} from "@/libraries/Address.sol";
+import {WOTSp} from "@/libraries/WOTSp.sol";
 import {ISafe, ISafeProxyFactory, IMultiSend} from "@script/util/ISafe.sol";
-import {Lamport} from "@test/util/Lamport.sol";
 
 contract SafeTransactionScript is Script {
-    using Lamport for Lamport.Key;
+    using WOTSp for WOTSp.Context;
 
-    function args() public view returns (string memory password, uint256 sequence) {
-        password = vm.envString("PASSWORD");
-        sequence = vm.envUint("SEQUENCE");
+    function args() public view returns (string memory password, uint256 w, bytes32 seed) {
+        password = vm.envString("QUSIGNER_PASSWORD");
+        w = vm.envOr("QUSIGNER_W", uint256(16));
+        seed = vm.envOr("QUSIGNER_SEED", keccak256(abi.encodePacked("seed:", password)));
     }
 
     function run() public {
-        (string memory password, uint256 sequence) = args();
+        (string memory password, uint256 w, bytes32 seed) = args();
 
-        Lamport.Key key = Lamport.fromPassword(password);
+        bytes32 sk = keccak256(abi.encodePacked("password:", password));
+        WOTSp.Context memory wots = WOTSp.Context({w: w, seed: seed, adrs: Address.zero()});
 
         QuSigner signer;
         {
             signer = QuSigner(
                 vm.computeCreate2Address(
                     bytes32(0),
-                    keccak256(abi.encodePacked(type(QuSigner).creationCode, key.publicKeyDigest(0))),
+                    keccak256(abi.encodePacked(type(QuSigner).creationCode, w, seed, wots.pubkey(sk))),
                     0x4e59b44847b379578588920cA78FbF26c0B4956C
                 )
             );
             if (address(signer).code.length == 0) {
+                bytes32 publicKey = wots.pubkey(sk);
                 vm.broadcast();
-                new QuSigner{salt: bytes32(0)}(key.publicKeyDigest(0));
+                new QuSigner{salt: bytes32(0)}(w, seed, publicKey);
             }
         }
 
@@ -60,31 +64,48 @@ contract SafeTransactionScript is Script {
         bytes32 safeTxHash = safe.getTransactionHash(
             address(safe), 0, "", ISafe.Operation.Call, 0, 0, 0, address(0), address(0), safe.nonce()
         );
-        (bytes32 next, bytes memory signature) = key.sign(sequence, safeTxHash);
-        bytes memory signatures = abi.encodePacked(uint256(uint160(address(signer))), uint256(65), uint8(0), uint256(0));
 
-        bytes memory transactions;
+        bytes memory signCallData;
         {
-            bytes memory signCallData = abi.encodeCall(signer.sign, (safeTxHash, next, signature));
-            bytes memory execCallData = abi.encodeCall(
-                safe.execTransaction,
-                (address(safe), 0, "", ISafe.Operation.Call, 0, 0, 0, address(0), address(0), signatures)
-            );
-            transactions = abi.encodePacked(
-                // signer.sign(...)
-                ISafe.Operation.Call,
-                signer,
-                uint256(0),
-                signCallData.length,
-                signCallData,
-                // safe.execTransaction(...)
-                ISafe.Operation.Call,
-                safe,
-                uint256(0),
-                execCallData.length,
-                execCallData
-            );
+            bytes32 randomness = bytes32(vm.randomUint());
+            uint64 signatureIndex = signer.getCount();
+            wots.adrs = Address.make(0, signatureIndex + 1);
+            bytes32 nextPublicKey = wots.pubkey(sk);
+            wots.adrs = Address.make(0, signatureIndex);
+            bytes32[] memory signature =
+                wots.sign(sk, signer.getSigningMessage(randomness, nextPublicKey, signatureIndex, safeTxHash));
+            signCallData = abi.encodeCall(signer.sign, (randomness, nextPublicKey, safeTxHash, signature));
         }
+        bytes memory execCallData = abi.encodeCall(
+            safe.execTransaction,
+            (
+                address(safe),
+                0,
+                "",
+                ISafe.Operation.Call,
+                0,
+                0,
+                0,
+                address(0),
+                address(0),
+                abi.encodePacked(uint256(uint160(address(signer))), uint256(65), uint8(0), uint256(0))
+            )
+        );
+
+        bytes memory transactions = abi.encodePacked(
+            // signer.sign(...)
+            ISafe.Operation.Call,
+            signer,
+            uint256(0),
+            signCallData.length,
+            signCallData,
+            // safe.execTransaction(...)
+            ISafe.Operation.Call,
+            safe,
+            uint256(0),
+            execCallData.length,
+            execCallData
+        );
 
         vm.broadcast();
         IMultiSend(0x9641d764fc13c8B624c04430C7356C1C7C8102e2).multiSend(transactions);
