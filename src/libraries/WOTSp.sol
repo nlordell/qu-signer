@@ -72,7 +72,7 @@ library WOTSp {
 
     /// @notice Recovers a public key from a message and signature.
     /// @param self The WOTS+ context.
-    /// @param m The message to sign.
+    /// @param m The signed message.
     /// @param sig The WOTS+ signature.
     /// @return pk The recovered WOTS+ public key L-tree root hash.
     function recover(Context memory self, bytes32 m, bytes32[] calldata sig) internal view returns (bytes32 pk) {
@@ -194,7 +194,7 @@ library WOTSp {
         return _sha256(bytes32(uint256(4)), key, m, n);
     }
 
-    /// @dev Specilialized SHA-256 function for WOTS+ designed for small code
+    /// @dev Specialized SHA-256 function for WOTS+ designed for small code
     ///      and reduced gas costs.
     function _sha256(bytes32 domain, bytes32 key, bytes32 m) private view returns (bytes32 result) {
         assembly ("memory-safe") {
@@ -207,7 +207,7 @@ library WOTSp {
         }
     }
 
-    /// @dev Specilialized SHA-256 function for WOTS+ designed for small code
+    /// @dev Specialized SHA-256 function for WOTS+ designed for small code
     ///      and reduced gas costs.
     function _sha256(bytes32 domain, bytes32 key, bytes32 m, bytes32 n) private view returns (bytes32 result) {
         assembly ("memory-safe") {
@@ -223,8 +223,8 @@ library WOTSp {
 
     /// @dev The base4 encoding of a message.
     function _base4(bytes32 m) private pure returns (bytes memory result) {
-        // The base-4 encoding of a 32-byte is split into 128 characters (4
-        // characters per byte). Additionally, we need an additional 5
+        // The base-4 encoding of a 32-byte message is split into 128 characters
+        // (4 characters per byte). Furthermore, we need an additional 5
         // characters to encode the checksum (which has a maximum value of
         // `3 * 128 = 0b01_10_00_00_00`). We implement it in assembly with a
         // partially unrolled inner loop for efficiency.
@@ -271,8 +271,8 @@ library WOTSp {
 
     /// @dev The base16 encoding of a message.
     function _base16(bytes32 m) private pure returns (bytes memory result) {
-        // The base-16 encoding of a 32-byte is split into 64 characters (2
-        // characters per byte). Additionally, we need an additional 3
+        // The base-16 encoding of a 32-byte message is split into 64 characters
+        // (2 characters per byte). Furthermore, we need an additional 3
         // characters to encode the checksum (which has a maximum value of
         // `15 * 64 = 0b0011_1100_0000`). We implement it in assembly with a
         // partially unrolled inner loop for efficiency.
@@ -321,7 +321,7 @@ library WOTSp {
         }
     }
 
-    /// @dev Writes a word at index `i`. It is the responsibility of the caller
+    /// @dev Reads a word at index `i`. It is the responsibility of the caller
     ///      to ensure that `0 <= i < a.length`.
     function _mread(bytes32[] memory a, uint256 i) private pure returns (bytes32 w) {
         assembly ("memory-safe") {

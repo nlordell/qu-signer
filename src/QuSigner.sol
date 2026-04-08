@@ -6,7 +6,7 @@ import {Address} from "@/libraries/Address.sol";
 import {WOTSp} from "@/libraries/WOTSp.sol";
 
 /// @title Quantum-Secure Signer
-/// @dev This signer implements a rolling Lamport signature scheme.
+/// @dev This signer implements a rolling WOTS+ signature scheme.
 contract QuSigner is IERC1271, ILegacyERC1271 {
     using WOTSp for WOTSp.Context;
 
@@ -36,13 +36,13 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
     // forge-lint: disable-next-line(mixed-case-variable)
     mapping(bytes32 message => bytes32 publicKey) private $signedMessages;
 
-    /// @notice Event emitted that a signature was signed.
+    /// @notice Event emitted when a message is signed.
     /// @param publicKey The WOTS+ public key that signed the message.
     /// @param signatureIndex The index of the signature.
     /// @param message The signed message.
     event SignedMessage(bytes32 publicKey, uint64 signatureIndex, bytes32 message);
 
-    /// @notice An invalid Winternitz paramter value.
+    /// @notice An invalid Winternitz parameter value.
     error InvalidWinternitzParameter();
 
     /// @notice An invalid public key.
@@ -81,8 +81,9 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
     /// @notice Computes the signing message, that a WOTS+ private key actually
     ///         signs over, for a particular message.
     /// @dev The rolling signature scheme doesn't sign over messages directly,
-    ///      but a hash of the message with the next public key. This ensures
-    ///      that only authorized rollovers are possible.
+    ///      but a hash combining the message, next public key, signature index,
+    ///      and additional randomness. This ensures that only authorized
+    ///      rollovers are possible.
     /// @param randomness Additional randomness used for hashing.
     /// @param nextPublicKey The public key to roll over to.
     /// @param signatureIndex The index of the signature.
@@ -116,7 +117,7 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
     /// @param randomness Additional randomness used for signing.
     /// @param nextPublicKey The public key to roll over to.
     /// @param message The message to sign.
-    /// @param signature The Lamport signature over the hash of the message and
+    /// @param signature The WOTS+ signature over the hash of the message and
     ///                  the next public key.
     /// @return publicKey The public key used to sign the message.
     /// @return signatureIndex The index of the signature.
@@ -149,7 +150,10 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
         return _isValidSignature(ILegacyERC1271.isValidSignature.selector, keccak256(data), signature);
     }
 
-    /// @dev Checks a signature and returns the provided magic value if valid.
+    /// @dev Checks whether a digest was previously signed via `sign()` and
+    ///      returns the provided magic value if so. The `signature` parameter
+    ///      must be empty because verification is done via the pre-registered
+    ///      `$signedMessages` mapping rather than an inline signature.
     function _isValidSignature(bytes4 validMagicValue, bytes32 digest, bytes calldata signature)
         private
         view

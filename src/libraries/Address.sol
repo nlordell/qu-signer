@@ -26,6 +26,7 @@ library Address {
         }
     }
 
+    /// @notice Sets the type of a hash function address.
     function setType(T self, Type typ) internal pure returns (T result) {
         unchecked {
             return T.wrap(
@@ -40,7 +41,7 @@ library Address {
         return _set4(self, chainAddress);
     }
 
-    /// @notice Sets the chain address for an OTS hash address.
+    /// @notice Sets the tree height for an L-tree hash address.
     function setTreeHeight(T self, uint32 treeHeight) internal pure returns (T result) {
         return _set4(self, treeHeight);
     }
@@ -60,7 +61,7 @@ library Address {
         return _set5(self, hashAddress);
     }
 
-    /// @notice Sets the hash address for an L-tree hash address.
+    /// @notice Sets the tree index for an L-tree hash address.
     function setTreeIndex(T self, uint32 treeIndex) internal pure returns (T result) {
         return _set5(self, treeIndex);
     }
