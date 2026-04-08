@@ -33,5 +33,5 @@ These signatures are, unfortunately, **space and time inefficient** compared to 
 This signer is compatible with the Safe smart account. It expects `sign` to be called to first pre-approve a message with the actual signature data and roll over. This repository contains an example Safe transaction controlled by a quantum-secure signer:
 
 ```sh
-PASSWORD="hello" forge script SafeTransactionScript
+QUSIGNER_PASSWORD="hello" forge script SafeTransactionScript
 ```
