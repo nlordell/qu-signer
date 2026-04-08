@@ -19,6 +19,7 @@ contract SafeTransactionScript is Script {
     function run() public {
         (string memory password, uint256 w, bytes32 seed) = args();
 
+        // This key derivation is UNSAFE and included only as an example.
         bytes32 sk = keccak256(abi.encodePacked("password:", password));
         WOTSp.Context memory wots = WOTSp.Context({w: w, seed: seed, adrs: Address.zero()});
 
