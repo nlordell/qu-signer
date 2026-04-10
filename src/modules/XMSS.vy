@@ -72,7 +72,7 @@ def _set_key_and_mask(_adrs: bytes32, _key_and_mask: uint32) -> bytes32:
 @internal
 @pure
 def _f(_key: bytes32, _m: bytes32) -> bytes32:
-    buffer: Bytes[96] = concat(convert(1, bytes32), _key, _m)
+    buffer: Bytes[96] = concat(convert(0, bytes32), _key, _m)
     return sha256(buffer)
 
 @internal
@@ -90,7 +90,7 @@ def _h_msg(_key: Bytes[96], _m: bytes32) -> bytes32:
 @internal
 @pure
 def _prf(_key: bytes32, _m: bytes32) -> bytes32:
-    buffer: Bytes[96] = concat(convert(1, bytes32), _key, _m)
+    buffer: Bytes[96] = concat(convert(3, bytes32), _key, _m)
     return sha256(buffer)
 
 @internal
@@ -107,42 +107,24 @@ def _prf_keygen(_key: bytes32, _m: Bytes[64]) -> bytes32:
 @pure
 def _base_16_char(_m: bytes32, _csum: uint256, _i: uint32) -> (uint32, uint256):
     m: uint256 = convert(_m, uint256)
-    offset: uint256 = unsafe_sub(63, convert(_i, uint256)) << 2
-    c: uint256 = (m >> offset) | (_csum >> unsafe_add(offset, 12))
-    return convert(c, uint32), unsafe_add(_csum, unsafe_sub(15, c))
+    c: uint256 = 0
+    if _i < 64:
+        offset: uint256 = unsafe_sub(63, convert(_i, uint256)) << 2
+        c = (m >> offset) & 15
+        _csum = unsafe_add(_csum, unsafe_sub(15, c))
+    else:
+        offset: uint256 = unsafe_sub(66, convert(_i, uint256)) << 2
+        c = (_csum >> offset) & 15
+    return convert(c, uint32), _csum
 
 @internal
 @pure
-def _base_16_old(_m: bytes32) -> Bytes[67]:
+def _base_16_char_branchless(_m: bytes32, _csum: uint256, _i: uint32) -> (uint32, uint256):
     m: uint256 = convert(_m, uint256)
-    hi: uint256 = 0
-    lo: uint256 = 0
-    csum: uint256 = 0
-    b: uint256 = 0
-    c: uint256 = 0
-    for i: uint256 in range(0, 16):
-        b = m >> (unsafe_sub(31, i) << 3)
-        c = b >> 4
-        hi = (hi << 8) | c
-        csum = unsafe_add(csum, unsafe_sub(15, c))
-        c = b & 15
-        hi = (hi << 8) | c
-        csum = unsafe_add(csum, unsafe_sub(15, c))
-    for i: uint256 in range(16, 32):
-        b = m >> (unsafe_sub(31, i) << 3)
-        c = b >> 4
-        lo = (lo << 8) | c
-        csum = unsafe_add(csum, unsafe_sub(15, c))
-        c = b & 15
-        lo = (lo << 8) | c
-        csum = unsafe_add(csum, unsafe_sub(15, c))
-    return concat(
-        convert(hi, bytes32),
-        convert(lo, bytes32),
-        convert(convert(csum >> 8, uint8), bytes1),
-        convert(convert((csum >> 4) & 15, uint8), bytes1),
-        convert(convert(csum & 15, uint8), bytes1)
-    )
+    offset: uint256 = unsafe_sub(63, convert(_i, uint256)) << 2
+    c: uint256 = ((m >> offset) | (_csum >> unsafe_add(offset, 12))) & 15
+    csum: uint256 = unsafe_mul(convert(_i < 64, uint256), unsafe_sub(15, c))
+    return convert(c, uint32), unsafe_add(_csum, csum)
 
 
 ### WOTS+
@@ -164,7 +146,6 @@ def _chain(_k: bytes32, _i: uint32, _s: uint32, _seed: bytes32, _adrs: bytes32) 
     bm: bytes32 = empty(bytes32)
     for j: uint32 in range(_s, bound=15):
         _adrs = self._set_hash_address(_adrs, unsafe_add(_i, j))
-        _adrs = self._set_key_and_mask(_adrs, 0)
         key = self._prf(_seed, _adrs)
         _adrs = self._set_key_and_mask(_adrs, 1)
         bm = self._prf(_seed, _adrs)
@@ -264,3 +245,20 @@ def _char(_m: Bytes[67], _i: uint32) -> uint32:
 @pure
 def _xor(_a: bytes32, _b: bytes32) -> bytes32:
     return convert(convert(_a, uint256) ^ convert(_b, uint256), bytes32)
+
+
+### TESTING
+# TODO: remove me...
+
+@external
+@pure
+def my_test_func() -> uint256:
+    sk: bytes32 = sha256("secret")
+    m: bytes32 = sha256("Hello, WOTS+!")
+    seed: bytes32 = sha256("seed")
+    adrs: bytes32 = convert(42 << 160, bytes32)
+    sig: bytes32[67] = self._sign(sk, m, seed, adrs)
+    pk: bytes32[67] = self._recover(m, sig, seed, adrs)
+    adrs = self._set_type(adrs, _TYPE_LTREE)
+    leaf: bytes32 = self._ltree(pk, seed, adrs)
+    return convert(leaf, uint256)
