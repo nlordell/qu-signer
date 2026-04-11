@@ -28,7 +28,7 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
     /// @notice The signature count.
     /// @dev We use this count as the XMSS tree address for WOTS+ operations.
     // forge-lint: disable-next-line(mixed-case-variable)
-    uint64 private $count;
+    uint64 private $signatureCount;
 
     /// @notice The signed messages.
     /// @dev This mapping stores the hash of the public key that last signed a
@@ -74,8 +74,8 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
 
     /// @notice Gets the signature count.
     /// @return result The number of messages that have been signed.
-    function getCount() external view returns (uint64 result) {
-        return $count;
+    function getSignatureCount() external view returns (uint64 result) {
+        return $signatureCount;
     }
 
     /// @notice Computes the signing message, that a WOTS+ private key actually
@@ -129,7 +129,7 @@ contract QuSigner is IERC1271, ILegacyERC1271 {
 
         publicKey = $publicKey;
         $publicKey = nextPublicKey;
-        signatureIndex = $count++;
+        signatureIndex = $signatureCount++;
         $signedMessages[message] = publicKey;
 
         WOTSp.Context memory wots = WOTSp.Context({w: W, seed: SEED, adrs: Address.make(0, signatureIndex)});

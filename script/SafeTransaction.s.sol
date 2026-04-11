@@ -69,7 +69,7 @@ contract SafeTransactionScript is Script {
         bytes memory signCallData;
         {
             bytes32 randomness = bytes32(vm.randomUint());
-            uint64 signatureIndex = signer.getCount();
+            uint64 signatureIndex = signer.getSignatureCount();
             wots.adrs = Address.make(0, signatureIndex + 1);
             bytes32 nextPublicKey = wots.pubkey(sk);
             wots.adrs = Address.make(0, signatureIndex);
